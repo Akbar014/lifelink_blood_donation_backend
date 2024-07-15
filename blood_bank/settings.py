@@ -30,7 +30,10 @@ SECRET_KEY = env("SECRET_KEY"),
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
-CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:5500', 'http://localhost:5500', 'https://*.127.0.0.1']
+Access-Control-Allow-Origin: ["*"]
+CSRF_TRUSTED_ORIGINS = ["*"]
+
+# CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:5500', 'http://localhost:5500', 'https://*.127.0.0.1']
 
 
 # Application definition
