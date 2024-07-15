@@ -30,10 +30,12 @@ SECRET_KEY = env("SECRET_KEY"),
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
-Access-Control-Allow-Origin: ["*"]
-CSRF_TRUSTED_ORIGINS = ["*"]
 
-# CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:5500', 'http://localhost:5500', 'https://*.127.0.0.1']
+# Access-Control-Allow-Origin: ["*"]
+# CSRF_TRUSTED_ORIGINS = ["*"]
+CORS_ALLOW_ALL_ORIGINS = True
+
+CSRF_TRUSTED_ORIGINS = ['https://lifelink-4bu4.onrender.com','http://127.0.0.1:5500', 'http://localhost:5500', 'https://*.127.0.0.1']
 
 
 # Application definition
