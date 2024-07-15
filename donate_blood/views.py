@@ -54,6 +54,8 @@ class DonationRequestViewset(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+
+
     @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
     def blood_group_filter(self, request):
         blood_group = request.query_params.get('blood_group', None)
@@ -112,7 +114,7 @@ class UserRegistrationApiView(APIView):
             token = default_token_generator.make_token(user)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             print("uid ", uid)
-            confirm_link = f"http://127.0.0.1:8000/donate_blood/active/{uid}/{token}"
+            confirm_link = f"https://lifelink-4bu4.onrender.com/donate_blood/active/{uid}/{token}"
             email_subject = "Confirm Your Email"
             email_body = render_to_string('confirm_email.html', {'confirm_link' : confirm_link})
             
@@ -134,7 +136,7 @@ def activate(request, uid64, token):
     if user is not None and default_token_generator.check_token(user, token):
         user.is_active = True
         user.save()
-        return redirect('http://127.0.0.1:5500/login.html')
+        return redirect('https://akbar014.github.io/lifelink_blood_donation_frontend/login.html')
     else:
         return redirect('register')
 
