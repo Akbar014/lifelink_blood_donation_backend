@@ -1,0 +1,250 @@
+from django.shortcuts import render,redirect
+from rest_framework import viewsets
+from rest_framework import permissions
+from . import models
+from . import serializers
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework import generics
+from django.http import JsonResponse, HttpResponse
+from django.utils import timezone
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.decorators import api_view
+# token 
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate, login, logout
+from rest_framework.authtoken.models import Token
+# for sending email
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
+from django.shortcuts import redirect
+# Create your views here.
+
+class DonationRequestViewset(viewsets.ModelViewSet):
+    
+    queryset = models.DonationRequest.objects.all()
+    serializer_class = serializers.DonationRequestSerializer  
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    def perform_create(self, serializer):
+        serializer.save(user= self.request.user) 
+
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        blood_group = self.request.query_params.get('blood_group', None)
+        if blood_group is not None:
+            queryset = queryset.filter(blood_group=blood_group)
+        return queryset
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def my_requests(self, request): 
+        user = request.user
+        blood_group = request.query_params.get('blood_group', None)
+        queryset = models.DonationRequest.objects.filter(user=user)
+        if blood_group is not None:
+            queryset = queryset.filter(blood_group=blood_group)
+        serializer = serializers.DonationRequestSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def blood_group_filter(self, request):
+        blood_group = request.query_params.get('blood_group', None)
+        queryset = models.DonationRequest.objects.filter( is_completed=False, is_accepted = False)
+        if blood_group is not None:
+            queryset = queryset.filter(blood_group=blood_group)
+        serializer = serializers.DonationRequestSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+
+
+class DonationHistoryViewSet(viewsets.ModelViewSet):
+    queryset = models.DonatioHistory.objects.none()
+    serializer_class = serializers.DonationHistorySerializer  
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    # authentication_classes = [TokenAuthentication]
+
+    def get_queryset(self):
+        return models.DonatioHistory.objects.filter(user=self.request.user)
+        
+        # return models.DonatioHistory.objects.all()
+
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = models.UserAccount.objects.all()
+    serializer_class = serializers.UserAccountSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return models.UserAccount.objects.filter(is_available_for_donation = True)
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def blood_group_filter(self, request):
+        blood_group = request.query_params.get('blood_group', None)
+        queryset = self.get_queryset()  # Use the get_queryset method to ensure filtering by is_available_for_donation
+        if blood_group is not None:
+            queryset = queryset.filter(blood_group=blood_group)
+        serializer = serializers.UserAccountSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+
+class UserRegistrationApiView(APIView):
+    serializer_class = serializers.RegistrationSerializer
+    permission_classes = [AllowAny] 
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            # print(user)
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            print("uid ", uid)
+            confirm_link = f"http://127.0.0.1:8000/donate_blood/active/{uid}/{token}"
+            email_subject = "Confirm Your Email"
+            email_body = render_to_string('confirm_email.html', {'confirm_link' : confirm_link})
+            
+            email = EmailMultiAlternatives(email_subject , '', to=[user.email])
+            email.attach_alternative(email_body, "text/html")
+            email.send()
+            return Response("Check your mail for confirmation")
+        return Response(serializer.errors)
+
+
+def activate(request, uid64, token):
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    try:
+        uid = urlsafe_base64_decode(uid64).decode()
+        user = User._default_manager.get(pk=uid)
+    except(User.DoesNotExist):
+        user = None 
+    
+    if user is not None and default_token_generator.check_token(user, token):
+        user.is_active = True
+        user.save()
+        return redirect('http://127.0.0.1:5500/login.html')
+    else:
+        return redirect('register')
+
+@api_view(['GET', 'POST'])
+def accept(request, donation_request_id):
+    print(donation_request_id)
+    try:
+
+        donation_request = models.DonationRequest.objects.get(pk= donation_request_id)
+        print(request.user)
+        user_account = models.UserAccount.objects.get(user=request.user)
+        
+
+        if request.user == donation_request.user:
+            return JsonResponse({'message': 'You cannot accept your own donation request.'}, status=400)
+
+        
+        else:
+            if user_account.blood_group == donation_request.blood_group:
+                donation_request.is_accepted = True
+                donation_request.status = 'Accepted'
+                donation_request.save()
+                models.DonatioHistory.objects.create(user=request.user, donation_request=donation_request, status='Accepted')
+                return JsonResponse({'message': 'Donation Request Accepted'}, status=200)
+            else:
+                return JsonResponse({'message': 'Blood Group Not Matched'}, status=404)
+              
+    except(donation_request.DoesNotExist):
+        return JsonResponse({'message': 'Donation Request not found'}, status=404)
+
+@api_view(['GET', 'POST'])
+def cancel(request, donation_request_id):
+    try:
+        donation_request = models.DonationRequest.objects.get(pk= donation_request_id)
+        donation_request.is_accepted = False
+        donation_request.status = 'Canceled'
+        donation_request.save()
+        models.DonatioHistory.objects.create(user=request.user, donation_request=donation_request, status='Canceled')
+        return JsonResponse({'message': 'Donation Request Canceled'}, status=200)
+       
+    except(donation_request.DoesNotExist):
+        return JsonResponse({'message': 'Donation Request not found'}, status=404)
+        
+    
+@api_view(['GET', 'POST'])
+def complete(request, donation_request_id):
+    try:
+        donation_request = models.DonationRequest.objects.get(pk= donation_request_id)
+        donation_request.is_completed = True
+        donation_request.status = 'Completed'
+        donation_request.save()
+
+        user_account = models.UserAccount.objects.get(user=request.user)
+        user_account.last_donation_date = timezone.now()
+        user_account.save()
+
+        models.DonatioHistory.objects.create(user=request.user, donation_request=donation_request, status='Completed')
+        return JsonResponse({'message': 'Donation Request Completed'}, status=200)
+       
+    except(donation_request.DoesNotExist):
+        return JsonResponse({'message': 'Donation Request not found'}, status=404)
+        
+    
+
+def blood_group_filter(request, blood_group):
+    try:
+        donation_requests = models.DonationRequest.objects.filter(blood_group=blood_group)
+        
+        if not donation_requests.exists():
+            return JsonResponse({'message': 'Donation Request not found'}, status=404)
+        
+        # Format the queryset into a list of dictionaries (or another suitable format)
+        donation_requests_data = list(donation_requests.values())
+
+        return JsonResponse(donation_requests_data, safe=False, status=200)
+       
+    except models.DonationRequest.DoesNotExist:
+        return JsonResponse({'message': 'Donation Request not found'}, status=404)
+    
+
+class UserLoginApiView(APIView):
+    permission_classes = [AllowAny] 
+    def post(self, request):
+        serializer = serializers.UserLoginSerializer(data = self.request.data)
+        
+        if serializer.is_valid():
+            username = serializer.validated_data['username']
+            password = serializer.validated_data['password']
+
+            user = authenticate(username= username, password=password)
+            userAccount = models.UserAccount.objects.get(user=user)
+            
+            if user:
+                token, _ = Token.objects.get_or_create(user=user)
+                print(token)
+                print(_)
+                login(request, user)
+                return Response({'token' : token.key, 'user' : user.username, 'user_id' : userAccount.id})
+            else:
+                return Response({'error' : "Invalid Credential"})
+        return Response(serializer.errors)
+
+
+class UserLogoutView(APIView):
+    def get(self, request):
+        request.user.auth_token.delete()
+        logout(request)
+        return redirect('login')
+
+
+
+
+ 
